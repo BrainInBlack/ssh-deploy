@@ -5,6 +5,11 @@ on:
   push:
   pull_request:
 
+# Least privilege: this workflow only reads the repo to lint it.
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   shellcheck:
     runs-on: ubuntu-latest
