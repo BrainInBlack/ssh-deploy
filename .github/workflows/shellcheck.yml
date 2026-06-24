@@ -1,0 +1,18 @@
+name: shellcheck
+
+# Runs on GitHub Actions.
+on:
+  push:
+  pull_request:
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure shellcheck is available
+        run: command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y shellcheck; }
+      - name: Lint
+        run: |
+          bash -n ssh-deploy
+          shellcheck ssh-deploy

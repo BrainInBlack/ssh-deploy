@@ -1,0 +1,8 @@
+# macOS
+.DS_Store
+
+# editor / temp
+*.swp
+*~
+*.bak
+*.rb-bak-*

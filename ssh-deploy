@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+#
+# ssh-deploy — push a local script to an SSH host (from ~/.ssh/config) and run it there as root.
+#
+# Pick a host (fzf if available, else a numbered menu) or pass --target, confirm,
+# then: scp -> /tmp, `sudo bash` over a TTY, cleanup. Returns the remote script's exit code.
+#
+# Repo:    https://github.com/BrainInBlack/ssh-deploy
+# Author:  BrainInBlack
+# License: MIT — see LICENSE
+#
+set -uo pipefail
+VERSION=1.0.0
+
+# ---------------------------------------------------------------- defaults / args
+SSH_CONFIG="$HOME/.ssh/config"
+PAYLOAD=""
+opt_target="" opt_yes=0 opt_dryrun=0 opt_color=1 want_help=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)     want_help=1; shift ;;
+    -V|--version)  echo "ssh-deploy $VERSION"; exit 0 ;;
+    -y|--yes)      opt_yes=1; shift ;;
+    -n|--dry-run)  opt_dryrun=1; shift ;;
+    --no-color)    opt_color=0; shift ;;
+    -t|--target)   opt_target="${2:-}"; [ -n "$opt_target" ] || { echo "--target needs a value" >&2; exit 2; }; shift 2 ;;
+    -c|--config)   SSH_CONFIG="${2:-}"; [ -n "$SSH_CONFIG" ] || { echo "--config needs a value" >&2; exit 2; }; shift 2 ;;
+    --)            shift; break ;;
+    -*)            echo "unknown option: $1  (try --help)" >&2; exit 2 ;;
+    *)             PAYLOAD="$1"; shift ;;
+  esac
+done
+
+# ---------------------------------------------------------------- colors
+setup_colors() {
+  if [ "$opt_color" = "0" ] || [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ] || [ "${TERM:-}" = "dumb" ]; then
+    BOLD='' DIM='' RED='' GRN='' YEL='' BLU='' CYN='' MAG='' RST=''
+  else
+    BOLD=$'\e[1m' DIM=$'\e[2m' RED=$'\e[31m' GRN=$'\e[32m' YEL=$'\e[33m'
+    BLU=$'\e[34m' CYN=$'\e[36m' MAG=$'\e[35m' RST=$'\e[0m'
+  fi
+}
+setup_colors
+
+hr()    { printf '%s────────────────────────────────────────────────%s\n' "$DIM" "$RST"; }
+title() { printf '\n%s%s▸ %s%s\n' "$BOLD" "$CYN" "$1" "$RST"; }
+step()  { printf '%s%s==>%s %s\n' "$BOLD" "$BLU" "$RST" "$*"; }
+info()  { printf '  %s•%s %s\n' "$DIM" "$RST" "$*"; }
+ok()    { printf '%s%s✓%s %s\n' "$BOLD" "$GRN" "$RST" "$*"; }
+warn()  { printf '%s%s!%s %s\n' "$BOLD" "$YEL" "$RST" "$*" >&2; }
+die()   { printf '%s%s✗%s %s\n' "$BOLD" "$RED" "$RST" "$*" >&2; exit 1; }
+
+usage() {
+cat <<EOF
+${BOLD}ssh-deploy${RST} ${DIM}v$VERSION${RST} — push a local script to an SSH host and run it as root.
+
+${BOLD}USAGE${RST}
+  ssh-deploy [options] <payload>
+
+${BOLD}ARGUMENTS${RST}
+  payload              local script to run as root on the target  ${DIM}(required)${RST}
+
+${BOLD}OPTIONS${RST}
+  ${CYN}-t, --target HOST${RST}   deploy to this ssh alias / user@host (skip the picker)
+  ${CYN}-y, --yes${RST}           don't ask for confirmation
+  ${CYN}-n, --dry-run${RST}       show what would happen; don't copy or run
+  ${CYN}-c, --config FILE${RST}   ssh config to read ${DIM}(default: ~/.ssh/config)${RST}
+      ${CYN}--no-color${RST}      disable colored output
+  ${CYN}-h, --help${RST}          show this help
+  ${CYN}-V, --version${RST}       show version
+
+${BOLD}EXAMPLES${RST}
+  ssh-deploy setup.sh              ${DIM}# pick a host (fzf/menu), then deploy${RST}
+  ssh-deploy -t web01 setup.sh     ${DIM}# straight to a known host${RST}
+  ssh-deploy -n -t web01 setup.sh  ${DIM}# dry-run: show the plan, change nothing${RST}
+EOF
+}
+
+[ "$want_help" = "1" ] && { usage; exit 0; }
+[ -n "$PAYLOAD" ] || { usage >&2; exit 2; }
+
+# ---------------------------------------------------------------- parse ssh config
+[ -f "$SSH_CONFIG" ] || die "no ssh config at ${BOLD}$SSH_CONFIG${RST}"
+aliases=() hosts=() host_start=0
+while IFS= read -r line; do
+  # ssh treats '=' and whitespace as equivalent separators (e.g. Host=web01)
+  line="${line//=/ }"
+  read -r kw rest <<<"$line"
+  case "$kw" in
+    [Hh][Oo][Ss][Tt])
+      host_start=${#aliases[@]}
+      # shellcheck disable=SC2086  # intentional: split the Host line into individual aliases
+      for name in $rest; do
+        case "$name" in *[*?]*) ;; *) aliases+=("$name"); hosts+=("") ;; esac
+      done ;;
+    [Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee])
+      # apply HostName to every alias declared on the current Host line
+      for ((j=host_start; j<${#aliases[@]}; j++)); do hosts[j]="$rest"; done ;;
+  esac
+done < "$SSH_CONFIG"
+
+print_hosts() {
+  local w=0 i=1 idx
+  for a in "${aliases[@]}"; do [ ${#a} -gt "$w" ] && w=${#a}; done
+  for ((idx=0; idx<${#aliases[@]}; idx++)); do
+    printf "  %s%2d%s  %s%-*s%s  %s%s%s\n" \
+      "$DIM" "$i" "$RST" "$CYN" "$w" "${aliases[$idx]}" "$RST" "$DIM" "${hosts[$idx]}" "$RST"
+    i=$((i+1))
+  done
+}
+
+# ---------------------------------------------------------------- payload check
+[ -f "$PAYLOAD" ] || die "payload not found: ${BOLD}$PAYLOAD${RST}"
+
+# ---------------------------------------------------------------- choose target
+pick_fzf() {
+  local lines="" idx choice preview
+  for ((idx=0; idx<${#aliases[@]}; idx++)); do
+    lines+="${aliases[$idx]}"$'\t'"${hosts[$idx]}"$'\n'
+  done
+  lines+="[manual]"$'\t'"type a target by hand"$'\n'
+  # resolve against the same config the deploy will use
+  preview="ssh -G -F '$SSH_CONFIG' {1} 2>/dev/null | grep -iE '^(hostname|user|port|identityfile) ' || echo '(manual entry)'"
+  choice=$(printf '%s' "$lines" | fzf \
+      --delimiter='\t' --with-nth=1,2 --ansi \
+      --prompt='deploy ▸ ' --height='50%' --reverse --border \
+      --header='enter = deploy    esc = cancel' \
+      --preview "$preview" \
+      --preview-window='right:48%') || return 1
+  [ -n "$choice" ] || return 1
+  printf '%s' "${choice%%$'\t'*}"
+}
+
+target=""
+if [ -n "$opt_target" ]; then
+  target="$opt_target"
+elif [ ${#aliases[@]} -eq 0 ]; then
+  warn "no host aliases in $SSH_CONFIG"
+  printf '%sTarget (user@host):%s ' "$BOLD" "$RST"; read -r target
+elif command -v fzf >/dev/null 2>&1; then
+  sel="$(pick_fzf)" || die "cancelled."
+  if [ "$sel" = "[manual]" ]; then printf '%sTarget (user@host):%s ' "$BOLD" "$RST"; read -r target
+  else target="$sel"; fi
+else
+  title "select a host"
+  print_hosts
+  printf "  %s%2d%s  %smanual entry%s\n" "$DIM" "$(( ${#aliases[@]} + 1 ))" "$RST" "$MAG" "$RST"
+  printf '%sNumber:%s ' "$BOLD" "$RST"; read -r n
+  if [ "$n" = "$(( ${#aliases[@]} + 1 ))" ]; then printf '%sTarget (user@host):%s ' "$BOLD" "$RST"; read -r target
+  elif [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le ${#aliases[@]} ]; then target="${aliases[$((n-1))]}"
+  else die "invalid selection."; fi
+fi
+[ -n "$target" ] || die "no target chosen."
+
+# ---------------------------------------------------------------- plan + confirm
+base="$(basename "$PAYLOAD")"
+remote_tmpl="/tmp/ssh-deploy.XXXXXX"
+
+title "deploy plan"
+printf "  %sPayload%s  %s\n"        "$DIM" "$RST" "$PAYLOAD"
+printf "  %sTarget %s  %s%s%s\n"    "$DIM" "$RST" "$BOLD$CYN" "$target" "$RST"
+printf "  %sRemote %s  %s %s(mktemp; sudo bash, then removed)%s\n" "$DIM" "$RST" "$remote_tmpl" "$DIM" "$RST"
+
+if [ "$opt_dryrun" = "1" ]; then
+  warn "dry-run — nothing deployed"
+  info "remote=\$(ssh -F $SSH_CONFIG $target 'mktemp $remote_tmpl')"
+  info "scp -F $SSH_CONFIG \"$PAYLOAD\" \"$target:\$remote\""
+  info "ssh -F $SSH_CONFIG -t $target \"sudo bash \$remote; rm -f \$remote\""
+  exit 0
+fi
+
+if [ "$opt_yes" != "1" ]; then
+  printf '\n%sProceed?%s [y/N] ' "$BOLD" "$RST"; read -r ans
+  case "$ans" in [Yy]|[Yy][Ee][Ss]) ;; *) die "aborted." ;; esac
+fi
+
+# ---------------------------------------------------------------- deploy
+# Share one SSH connection for mktemp + scp + run, so authentication (password
+# or key touch) happens once and all three operations reuse it. The control
+# socket lives under /tmp to keep the path short (Unix socket length limit).
+ctl_dir="$(mktemp -d /tmp/ssh-deploy.XXXXXX)" || die "could not create control dir."
+ssh_opts=(-F "$SSH_CONFIG" -o ControlMaster=auto -o "ControlPath=$ctl_dir/c" -o ControlPersist=30s)
+trap 'ssh "${ssh_opts[@]}" -O exit "$target" 2>/dev/null; rm -rf "$ctl_dir"' EXIT
+
+echo
+step "copying ${BOLD}$base${RST} → ${CYN}$target${RST}"
+# Create the remote file atomically (mktemp, mode 600): no predictable /tmp
+# name, no symlink/clobber race, and the path carries no shell-special chars.
+# shellcheck disable=SC2029  # remote_tmpl is a fixed template — expanding it client-side is intended
+remote="$(ssh "${ssh_opts[@]}" "$target" "mktemp $remote_tmpl")" || die "could not create remote temp file."
+[ -n "$remote" ] || die "remote mktemp returned an empty path."
+scp "${ssh_opts[@]}" -q "$PAYLOAD" "$target:$remote" || die "scp failed."
+ok "copied"
+step "running on ${CYN}$target${RST} ${DIM}(sudo)${RST}"
+hr
+ssh "${ssh_opts[@]}" -t "$target" "sudo bash '$remote'; r=\$?; rm -f '$remote'; exit \$r"
+rc=$?
+hr
+if [ "$rc" -eq 0 ]; then ok "done on ${BOLD}$target${RST}"; else die "finished with errors (rc=$rc) on $target"; fi
