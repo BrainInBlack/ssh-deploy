@@ -80,7 +80,7 @@ EXAMPLES
 
 ## How it works
 
-1. Parse `~/.ssh/config` (or `--config FILE`) for `Host` aliases (wildcard/pattern entries are skipped; `Include` files aren't followed). The same config file is used for the actual `scp`/`ssh` connection.
+1. Parse `~/.ssh/config` (or `--config FILE`) for `Host` aliases (wildcard/pattern entries are skipped; `Include` files aren't followed). The config is **optional** — with no `~/.ssh/config` and no `--config`, the picker is skipped and you're prompted for a target (or pass `--target`). When a config is present it's also used for the actual `scp`/`ssh` connection.
 2. Pick one (fzf preview shows the resolved `ssh -G` hostname/user/port/key) or pass `--target`; manual `user@host` is always an option.
 3. Print the deploy plan and ask to confirm (`-y` to skip, `-n` to only preview).
 4. Open one shared SSH connection (so the password / key-touch happens **once**), `mktemp` a private file under `/tmp` on the target, and `scp` the payload into it — no predictable name, no symlink/clobber race.

@@ -10,12 +10,12 @@
 # License: MIT — see LICENSE
 #
 set -uo pipefail
-VERSION=1.0.0
+VERSION=1.1.0
 
 # ---------------------------------------------------------------- defaults / args
 SSH_CONFIG="$HOME/.ssh/config"
 PAYLOAD=""
-opt_target="" opt_yes=0 opt_dryrun=0 opt_color=1 want_help=0
+opt_target="" opt_yes=0 opt_dryrun=0 opt_color=1 want_help=0 config_explicit=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -25,7 +25,7 @@ while [ $# -gt 0 ]; do
     -n|--dry-run)  opt_dryrun=1; shift ;;
     --no-color)    opt_color=0; shift ;;
     -t|--target)   opt_target="${2:-}"; [ -n "$opt_target" ] || { echo "--target needs a value" >&2; exit 2; }; shift 2 ;;
-    -c|--config)   SSH_CONFIG="${2:-}"; [ -n "$SSH_CONFIG" ] || { echo "--config needs a value" >&2; exit 2; }; shift 2 ;;
+    -c|--config)   SSH_CONFIG="${2:-}"; [ -n "$SSH_CONFIG" ] || { echo "--config needs a value" >&2; exit 2; }; config_explicit=1; shift 2 ;;
     --)            shift; break ;;
     -*)            echo "unknown option: $1  (try --help)" >&2; exit 2 ;;
     *)             PAYLOAD="$1"; shift ;;
@@ -81,24 +81,30 @@ EOF
 [ -n "$PAYLOAD" ] || { usage >&2; exit 2; }
 
 # ---------------------------------------------------------------- parse ssh config
-[ -f "$SSH_CONFIG" ] || die "no ssh config at ${BOLD}$SSH_CONFIG${RST}"
+# The config is optional: if the default ~/.ssh/config is absent we just skip the
+# picker and prompt for a target (or use --target). But an explicit --config file
+# that doesn't exist is a user error worth reporting.
 aliases=() hosts=() host_start=0
-while IFS= read -r line; do
-  # ssh treats '=' and whitespace as equivalent separators (e.g. Host=web01)
-  line="${line//=/ }"
-  read -r kw rest <<<"$line"
-  case "$kw" in
-    [Hh][Oo][Ss][Tt])
-      host_start=${#aliases[@]}
-      # shellcheck disable=SC2086  # intentional: split the Host line into individual aliases
-      for name in $rest; do
-        case "$name" in *[*?]*) ;; *) aliases+=("$name"); hosts+=("") ;; esac
-      done ;;
-    [Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee])
-      # apply HostName to every alias declared on the current Host line
-      for ((j=host_start; j<${#aliases[@]}; j++)); do hosts[j]="$rest"; done ;;
-  esac
-done < "$SSH_CONFIG"
+if [ -f "$SSH_CONFIG" ]; then
+  while IFS= read -r line; do
+    # ssh treats '=' and whitespace as equivalent separators (e.g. Host=web01)
+    line="${line//=/ }"
+    read -r kw rest <<<"$line"
+    case "$kw" in
+      [Hh][Oo][Ss][Tt])
+        host_start=${#aliases[@]}
+        # shellcheck disable=SC2086  # intentional: split the Host line into individual aliases
+        for name in $rest; do
+          case "$name" in *[*?]*) ;; *) aliases+=("$name"); hosts+=("") ;; esac
+        done ;;
+      [Hh][Oo][Ss][Tt][Nn][Aa][Mm][Ee])
+        # apply HostName to every alias declared on the current Host line
+        for ((j=host_start; j<${#aliases[@]}; j++)); do hosts[j]="$rest"; done ;;
+    esac
+  done < "$SSH_CONFIG"
+elif [ "$config_explicit" = "1" ]; then
+  die "no ssh config at ${BOLD}$SSH_CONFIG${RST}"
+fi
 
 print_hosts() {
   local w=0 i=1 idx
@@ -136,7 +142,8 @@ target=""
 if [ -n "$opt_target" ]; then
   target="$opt_target"
 elif [ ${#aliases[@]} -eq 0 ]; then
-  warn "no host aliases in $SSH_CONFIG"
+  if [ -f "$SSH_CONFIG" ]; then warn "no host aliases in $SSH_CONFIG"
+  else warn "no ssh config at $SSH_CONFIG — enter a target manually"; fi
   printf '%sTarget (user@host):%s ' "$BOLD" "$RST"; read -r target
 elif command -v fzf >/dev/null 2>&1; then
   sel="$(pick_fzf)" || die "cancelled."
@@ -164,9 +171,10 @@ printf "  %sRemote %s  %s %s(mktemp; sudo bash, then removed)%s\n" "$DIM" "$RST"
 
 if [ "$opt_dryrun" = "1" ]; then
   warn "dry-run — nothing deployed"
-  info "remote=\$(ssh -F $SSH_CONFIG $target 'mktemp $remote_tmpl')"
-  info "scp -F $SSH_CONFIG \"$PAYLOAD\" \"$target:\$remote\""
-  info "ssh -F $SSH_CONFIG -t $target \"sudo bash \$remote; rm -f \$remote\""
+  F=""; [ -f "$SSH_CONFIG" ] && F="-F $SSH_CONFIG "
+  info "remote=\$(ssh ${F}$target 'mktemp $remote_tmpl')"
+  info "scp ${F}\"$PAYLOAD\" \"$target:\$remote\""
+  info "ssh ${F}-t $target \"sudo bash \$remote; rm -f \$remote\""
   exit 0
 fi
 
@@ -180,7 +188,9 @@ fi
 # or key touch) happens once and all three operations reuse it. The control
 # socket lives under /tmp to keep the path short (Unix socket length limit).
 ctl_dir="$(mktemp -d /tmp/ssh-deploy.XXXXXX)" || die "could not create control dir."
-ssh_opts=(-F "$SSH_CONFIG" -o ControlMaster=auto -o "ControlPath=$ctl_dir/c" -o ControlPersist=30s)
+ssh_opts=(-o ControlMaster=auto -o "ControlPath=$ctl_dir/c" -o ControlPersist=30s)
+# only pass -F when the config exists — ssh errors out on a missing -F file
+[ -f "$SSH_CONFIG" ] && ssh_opts+=(-F "$SSH_CONFIG")
 trap 'ssh "${ssh_opts[@]}" -O exit "$target" 2>/dev/null; rm -rf "$ctl_dir"' EXIT
 
 echo

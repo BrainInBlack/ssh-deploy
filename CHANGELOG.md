@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-25
+
 ### Added
 - Test suite ([bats](https://github.com/bats-core/bats-core)) covering the
   SSH-config parser, argument handling, dry-run output, and the deploy flow
   (with stubbed `ssh`/`scp` — no network needed). Runs in CI alongside ShellCheck.
+
+### Changed
+- `~/.ssh/config` is now optional. If it's absent and no `--config` is given,
+  ssh-deploy skips the picker and prompts for a target (or use `--target`)
+  instead of erroring out. An explicit `--config FILE` that doesn't exist is
+  still reported as an error, and `-F` is only passed to `ssh`/`scp` when a
+  config file actually exists.
 
 ## [1.0.0] - 2026-06-25
 

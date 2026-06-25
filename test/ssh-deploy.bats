@@ -10,6 +10,11 @@ setup() {
   STUB="$TMP/bin"
   mkdir -p "$STUB"
 
+  # Point HOME at the temp dir so the default ~/.ssh/config is reliably absent;
+  # tests that need a config pass it explicitly with -c. Keeps the suite hermetic
+  # regardless of the developer's real SSH setup.
+  export HOME="$TMP"
+
   export SSHLOG="$TMP/ssh.log"
   : > "$SSHLOG"
 
@@ -59,7 +64,7 @@ teardown() {
 @test "--version prints name and version" {
   run "$SCRIPT" --version
   [ "$status" -eq 0 ]
-  [ "$output" = "ssh-deploy 1.0.0" ]
+  [ "$output" = "ssh-deploy 1.1.0" ]
 }
 
 @test "--help shows usage and exits 0" {
@@ -97,6 +102,32 @@ teardown() {
   [[ "$output" == *"payload not found"* ]]
 }
 
+@test "explicit --config that is missing still dies" {
+  run "$SCRIPT" --no-color -c "$TMP/does-not-exist" -t web01 "$PAYLOAD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no ssh config"* ]]
+}
+
+# --- config is optional ------------------------------------------------------
+
+@test "no ssh config: -t still works, and no -F is passed" {
+  # HOME has no .ssh/config and no -c given; -t supplies the target.
+  run "$SCRIPT" --no-color -y -t myhost "$PAYLOAD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"done on"* ]]
+  ! grep -q -- "-F" "$SSHLOG"
+}
+
+@test "no ssh config and no -t: prompts for a target" {
+  run bash -c "printf 'myhost\n' | '$SCRIPT' --no-color -y '$PAYLOAD'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"enter a target manually"* ]]
+  [[ "$output" == *"Target (user@host)"* ]]
+  [[ "$output" == *"done on"* ]]
+  grep -q "myhost" "$SSHLOG"
+  ! grep -q -- "-F" "$SSHLOG"
+}
+
 # --- ssh config parser (via the numbered-menu listing) -----------------------
 
 @test "parser lists aliases with their hostnames" {
@@ -124,7 +155,7 @@ teardown() {
 # --- dry-run -----------------------------------------------------------------
 
 @test "dry-run shows the plan and touches nothing" {
-  run "$SCRIPT" --no-color -n -t web01 "$PAYLOAD"
+  run "$SCRIPT" --no-color -c "$CONFIG" -n -t web01 "$PAYLOAD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"dry-run"* ]]
   [[ "$output" == *"mktemp"* ]]
@@ -135,7 +166,7 @@ teardown() {
 # --- deploy (stubbed ssh/scp) ------------------------------------------------
 
 @test "deploy stages via mktemp, copies, runs, and reports success" {
-  run "$SCRIPT" --no-color -y -t web01 "$PAYLOAD"
+  run "$SCRIPT" --no-color -c "$CONFIG" -y -t web01 "$PAYLOAD"
   [ "$status" -eq 0 ]
   [[ "$output" == *"copied"* ]]
   [[ "$output" == *"done on"* ]]
@@ -164,7 +195,7 @@ done
 exit 0
 EOS
   chmod +x "$STUB/ssh"
-  run "$SCRIPT" --no-color -y -t web01 "$PAYLOAD"
+  run "$SCRIPT" --no-color -c "$CONFIG" -y -t web01 "$PAYLOAD"
   [ "$status" -eq 1 ]
   [[ "$output" == *"errors"* ]]
 }
