@@ -8,7 +8,6 @@ on:
 # Least privilege: this workflow only reads the repo to lint and test it.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   shellcheck:
@@ -22,7 +21,7 @@ jobs:
           bash -n ssh-deploy
           shellcheck ssh-deploy
 
-  tests:
+  test:
     # Run on Linux (GNU userland) and macOS (BSD userland + bash 3.2) to back up
     # the portability claims. shellcheck above is OS-independent, so it stays Linux-only.
     strategy:
