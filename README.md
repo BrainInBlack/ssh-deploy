@@ -2,7 +2,7 @@
 
 Push a local script to an SSH host — picked from your `~/.ssh/config` — and run it there as **root**, with a confirmation step and clean, colored output.
 
-[![Homebrew](https://img.shields.io/badge/homebrew-BrainInBlack%2Ftap-FBB040?logo=homebrew&logoColor=white)](https://github.com/BrainInBlack/homebrew-tap) ![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Bash 3.2+](https://img.shields.io/badge/bash-3.2%2B-1f425f) ![Shellcheck: clean](https://img.shields.io/badge/shellcheck-clean-brightgreen) ![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20BSD%20%7C%20WSL-informational)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![Bash 3.2+](https://img.shields.io/badge/bash-3.2%2B-1f425f) ![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20BSD%20%7C%20WSL-informational) ![Shellcheck: clean](https://img.shields.io/badge/shellcheck-clean-brightgreen) [![Homebrew](https://img.shields.io/badge/homebrew-BrainInBlack%2Ftap-FBB040?logo=homebrew&logoColor=white)](https://github.com/BrainInBlack/homebrew-tap)
 
 ## Why
 
