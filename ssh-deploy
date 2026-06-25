@@ -10,7 +10,7 @@
 # License: MIT — see LICENSE
 #
 set -uo pipefail
-VERSION=1.1.0
+VERSION=1.2.0
 
 # ---------------------------------------------------------------- defaults / args
 SSH_CONFIG="$HOME/.ssh/config"

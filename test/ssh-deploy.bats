@@ -64,7 +64,7 @@ teardown() {
 @test "--version prints name and version" {
   run "$SCRIPT" --version
   [ "$status" -eq 0 ]
-  [ "$output" = "ssh-deploy 1.1.0" ]
+  [ "$output" = "ssh-deploy 1.2.0" ]
 }
 
 @test "--help shows usage and exits 0" {

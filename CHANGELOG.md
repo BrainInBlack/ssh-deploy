@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-25
+
+### Added
+- Man page `ssh-deploy(1)` — viewable with `man ssh-deploy` once installed (the
+  Homebrew formula installs it). Documents options, exit status, files,
+  environment, and security notes.
+- CI now also runs the test suite on macOS (BSD userland + bash 3.2), alongside
+  Linux, to back up the portability claims.
+
 ## [1.1.0] - 2026-06-25
 
 ### Added

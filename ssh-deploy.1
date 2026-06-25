@@ -1,0 +1,190 @@
+.\" Manpage for ssh-deploy.
+.\" Keep the .TH version in sync with VERSION in the ssh-deploy script.
+.TH SSH-DEPLOY 1 "2026-06-25" "ssh-deploy 1.2.0" "User Commands"
+.SH NAME
+ssh\-deploy \- push a local script to an SSH host and run it there as root
+.SH SYNOPSIS
+.B ssh\-deploy
+.RB [ options ]
+.I payload
+.SH DESCRIPTION
+.B ssh\-deploy
+copies a local script
+.RI ( payload )
+to an SSH host and runs it there as
+.BR root .
+The host is chosen from your
+.BR ssh_config (5)
+\(em fuzzy\-picked with
+.BR fzf (1)
+if available, otherwise from a numbered menu \(em or given directly with
+.BR \-\-target .
+A manual
+.I user@host
+entry is always available.
+.PP
+Before anything is copied,
+.B ssh\-deploy
+prints a deploy plan (payload, target, and remote path) and asks for
+confirmation, unless
+.B \-\-yes
+is given. Use
+.B \-\-dry\-run
+to print the plan and the exact commands without changing anything.
+.PP
+On the target the payload is staged into a private temporary file created with
+.BR mktemp (1)
+(mode 0600 \(em no predictable path or symlink race), executed with
+.RB \(dq "sudo bash" \(dq
+over an allocated TTY, and removed afterward (even on failure). A single
+multiplexed SSH connection is shared by the staging copy and the run, so
+authentication (password or key touch) happens once per deploy.
+.B ssh\-deploy
+exits with the remote script's own exit status.
+.PP
+The SSH config is optional. With no
+.I ~/.ssh/config
+and no
+.BR \-\-config ,
+the host picker is skipped and you are prompted for a target (or pass
+.BR \-\-target ).
+When a config is present it is also used for the underlying
+.BR scp (1)
+and
+.BR ssh (1)
+connections.
+.SH OPTIONS
+.TP
+.BR \-t ", " \-\-target " " \fIHOST\fR
+Deploy to this SSH alias or
+.I user@host
+and skip the host picker.
+.TP
+.BR \-y ", " \-\-yes
+Do not ask for confirmation before deploying.
+.TP
+.BR \-n ", " \-\-dry\-run
+Show what would happen \(em the plan and the exact commands \(em without
+copying or running anything.
+.TP
+.BR \-c ", " \-\-config " " \fIFILE\fR
+Read SSH host aliases from
+.I FILE
+instead of the default
+.IR ~/.ssh/config ,
+and use
+.I FILE
+for the
+.BR scp (1)/ ssh (1)
+connection. A
+.I FILE
+that does not exist is an error.
+.TP
+.B \-\-no\-color
+Disable colored output.
+.TP
+.BR \-h ", " \-\-help
+Show a usage summary and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the version and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+The remote script ran and exited successfully.
+.TP
+.B 2
+Usage error (unknown option, missing
+.IR payload ,
+or an option missing its value).
+.TP
+.B 1
+A local precondition failed (an explicit
+.B \-\-config
+file is missing, the payload was not found,
+.BR scp (1)
+failed, the deploy was cancelled, or the remote script exited non\-zero).
+.PP
+When the remote script itself fails, its exit status is reported in the error
+message; the process exit code is
+.BR 1 .
+.SH FILES
+.TP
+.I ~/.ssh/config
+Default SSH client configuration, parsed for
+.B Host
+aliases (wildcard/pattern entries are skipped;
+.B Include
+files are not followed). Optional; overridden by
+.BR \-\-config .
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+If set (to any value), colored output is disabled.
+.TP
+.B TERM
+If
+.BR dumb ,
+or when standard output is not a terminal, colored output is disabled.
+.SH EXAMPLES
+Pick a host interactively, then deploy:
+.PP
+.RS
+.EX
+ssh\-deploy setup.sh
+.EE
+.RE
+.PP
+Deploy straight to a known host:
+.PP
+.RS
+.EX
+ssh\-deploy \-t web01 setup.sh
+.EE
+.RE
+.PP
+Preview the plan and commands without changing anything:
+.PP
+.RS
+.EX
+ssh\-deploy \-n \-t web01 setup.sh
+.EE
+.RE
+.PP
+Non\-interactive deploy using an explicit config:
+.PP
+.RS
+.EX
+ssh\-deploy \-y \-c ./deploy.sshconfig \-t web01 setup.sh
+.EE
+.RE
+.SH SECURITY
+.B ssh\-deploy
+runs
+.I your
+script as
+.B root
+on the remote host \(em review what you deploy. It authenticates using
+whatever
+.BR ssh_config (5)
+specifies for the host and never handles, copies, or stores keys. The payload
+is staged to an atomically\-created
+.BR mktemp (1)
+file under
+.I /tmp
+on the target and removed after the run.
+.SH SEE ALSO
+.BR ssh (1),
+.BR scp (1),
+.BR ssh_config (5),
+.BR sudo (8),
+.BR mktemp (1),
+.BR fzf (1)
+.SH REPORTING BUGS
+Report issues at https://github.com/BrainInBlack/ssh\-deploy/issues .
+Security issues: see the project's security policy for private reporting.
+.SH AUTHOR
+BrainInBlack.
+.SH COPYRIGHT
+MIT License. This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.

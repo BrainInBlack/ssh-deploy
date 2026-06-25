@@ -78,6 +78,8 @@ EXAMPLES
   ssh-deploy -n -t web01 setup.sh  # dry-run: show the plan, change nothing
 ```
 
+Full reference: `man ssh-deploy` (installed by Homebrew; documents exit status, files, and environment too).
+
 ## How it works
 
 1. Parse `~/.ssh/config` (or `--config FILE`) for `Host` aliases (wildcard/pattern entries are skipped; `Include` files aren't followed). The config is **optional** — with no `~/.ssh/config` and no `--config`, the picker is skipped and you're prompted for a target (or pass `--target`). When a config is present it's also used for the actual `scp`/`ssh` connection.
