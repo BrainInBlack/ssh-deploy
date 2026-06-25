@@ -23,10 +23,20 @@ jobs:
           shellcheck ssh-deploy
 
   tests:
-    runs-on: ubuntu-latest
+    # Run on Linux (GNU userland) and macOS (BSD userland + bash 3.2) to back up
+    # the portability claims. shellcheck above is OS-independent, so it stays Linux-only.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Install bats
+      - name: Install bats (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Install bats (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core
       - name: Run tests
         run: bats test
