@@ -1,11 +1,11 @@
-name: shellcheck
+name: CI
 
 # Runs on GitHub Actions.
 on:
   push:
   pull_request:
 
-# Least privilege: this workflow only reads the repo to lint it.
+# Least privilege: this workflow only reads the repo to lint and test it.
 permissions:
   contents: read
   pull-requests: write
@@ -21,3 +21,12 @@ jobs:
         run: |
           bash -n ssh-deploy
           shellcheck ssh-deploy
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run tests
+        run: bats test

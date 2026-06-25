@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Test suite ([bats](https://github.com/bats-core/bats-core)) covering the
+  SSH-config parser, argument handling, dry-run output, and the deploy flow
+  (with stubbed `ssh`/`scp` — no network needed). Runs in CI alongside ShellCheck.
+
 ## [1.0.0] - 2026-06-25
 
 ### Added

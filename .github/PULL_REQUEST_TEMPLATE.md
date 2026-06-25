@@ -24,6 +24,7 @@ See CONTRIBUTING.md for the ground rules.
   bash -n ssh-deploy
   shellcheck ssh-deploy
   ```
+- [ ] Tests pass (`bats test`), and new behavior is covered by a test.
 - [ ] Added a note under `## [Unreleased]` in `CHANGELOG.md`.
 - [ ] If behavior or flags changed, updated `README.md` **and** the in-script `--help` together.
 
