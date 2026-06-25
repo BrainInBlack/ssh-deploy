@@ -4,6 +4,8 @@ updates:
   # caught the actions/checkout Node-20 deprecation).
   - package-ecosystem: github-actions
     directory: "/"
+    # Bumps flow through the develop integration branch, not straight to main.
+    target-branch: "develop"
     schedule:
       interval: weekly
     commit-message:
