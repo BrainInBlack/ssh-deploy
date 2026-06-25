@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest an improvement or new option for ssh-deploy.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `ssh-deploy` aims to stay a small, single-file, portable Bash script
+        (bash 3.2+, no GNU-only tools, `ssh`/`scp` plus optional `fzf`). Proposals
+        that fit that shape are easiest to land.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case or the pain point, not just the solution.
+      placeholder: When I deploy to many hosts at once, I have to run ssh-deploy repeatedly because ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What new behavior, flag, or change would you like? Sketch the CLI if relevant.
+      placeholder: |
+        Add `--target host1,host2` to deploy to several hosts in sequence ...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you currently use, or other approaches you weighed.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This keeps ssh-deploy a single self-contained script with no new runtime dependencies.
+        - label: I searched existing issues and this isn't already requested.
+          required: true

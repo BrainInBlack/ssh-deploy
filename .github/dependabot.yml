@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Keep the GitHub Actions in our workflows current (this is what would have
+  # caught the actions/checkout Node-20 deprecation).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci

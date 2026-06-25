@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in ssh-deploy doesn't work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please don't report security
+        issues here — see the [security policy](../blob/main/.github/SECURITY.md)
+        for private reporting.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        I ran `ssh-deploy -t web01 setup.sh` and ...
+        I expected ... but ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact command(s) you ran. A `--dry-run` (`-n`) of the same command is very helpful.
+      placeholder: |
+        ssh-deploy -n -t web01 setup.sh
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: ssh-deploy version
+      description: Output of `ssh-deploy --version`.
+      placeholder: "ssh-deploy 1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: bash
+    attributes:
+      label: bash version
+      description: Output of `bash --version` (first line).
+      placeholder: "GNU bash, version 3.2.57(1)-release"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where are you running ssh-deploy (the local side)?
+      options:
+        - Linux
+        - macOS
+        - "*BSD"
+        - Windows (WSL)
+        - Windows (Git-Bash)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: fzf
+    attributes:
+      label: Is fzf installed?
+      options:
+        - "Yes (fuzzy picker)"
+        - "No (numbered-menu fallback)"
+        - "Not sure / used --target"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste any error output. Re-run with `--no-color` so escape codes don't clutter it.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through the security policy).
+          required: true
