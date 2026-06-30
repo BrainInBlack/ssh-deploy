@@ -122,7 +122,7 @@ teardown() {
   run bash -c "printf 'myhost\n' | '$SCRIPT' --no-color -y '$PAYLOAD'"
   [ "$status" -eq 0 ]
   [[ "$output" == *"enter a target manually"* ]]
-  [[ "$output" == *"Target (user@host)"* ]]
+  [[ "$output" == *"Target(s) (user@host"* ]]
   [[ "$output" == *"done on"* ]]
   grep -q "myhost" "$SSHLOG"
   ! grep -q -- "-F" "$SSHLOG"
