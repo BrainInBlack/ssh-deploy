@@ -64,7 +64,7 @@ teardown() {
 @test "--version prints name and version" {
   run "$SCRIPT" --version
   [ "$status" -eq 0 ]
-  [ "$output" = "ssh-deploy 1.2.0" ]
+  [ "$output" = "ssh-deploy 1.3.0" ]
 }
 
 @test "--help shows usage and exits 0" {
@@ -198,4 +198,62 @@ EOS
   run "$SCRIPT" --no-color -c "$CONFIG" -y -t web01 "$PAYLOAD"
   [ "$status" -eq 1 ]
   [[ "$output" == *"errors"* ]]
+}
+
+# --- multiple targets --------------------------------------------------------
+
+# Stub whose remote run fails only on web01 (mktemp/scp still succeed), so the
+# multi-target failure tests can tell stop-on-error from --keep-going.
+stub_fail_web01() {
+  cat > "$STUB/ssh" <<'EOS'
+#!/usr/bin/env bash
+echo "ssh $*" >> "$SSHLOG"
+for a in "$@"; do case "$a" in *mktemp*) echo "/tmp/ssh-deploy.testXXXX"; exit 0 ;; esac; done
+run=0 web01=0
+for a in "$@"; do
+  case "$a" in *"sudo bash"*) run=1 ;; esac
+  case "$a" in web01) web01=1 ;; esac
+done
+[ "$run" = 1 ] && [ "$web01" = 1 ] && exit 7
+exit 0
+EOS
+  chmod +x "$STUB/ssh"
+}
+
+@test "comma-separated -t deploys to every target" {
+  run "$SCRIPT" --no-color -c "$CONFIG" -y -t web01,db "$PAYLOAD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"done on"*"web01"* ]]
+  [[ "$output" == *"done on"*"db"* ]]
+  [[ "$output" == *"all 2 targets succeeded"* ]]
+  grep -q -- "-t web01 " "$SSHLOG"
+  grep -q -- "-t db "    "$SSHLOG"
+}
+
+@test "stop on first error: later targets are not touched" {
+  stub_fail_web01
+  run "$SCRIPT" --no-color -c "$CONFIG" -y -t web01,db "$PAYLOAD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"finished with errors"*"web01"* ]]
+  ! grep -q "db" "$SSHLOG"        # stopped before reaching the second host
+}
+
+@test "--keep-going continues past a failure and reports a summary" {
+  stub_fail_web01
+  run "$SCRIPT" --no-color -c "$CONFIG" -y -k -t web01,db "$PAYLOAD"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"continuing"* ]]
+  [[ "$output" == *"completed with failures"*"web01"* ]]
+  [[ "$output" == *"done on"*"db"* ]]
+  grep -q -- "-t db " "$SSHLOG"   # second host was still attempted
+}
+
+@test "dry-run with multiple targets lists them and shows the plan once" {
+  run "$SCRIPT" --no-color -c "$CONFIG" -n -t web01,db "$PAYLOAD"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"web01"* ]]
+  [[ "$output" == *"db"* ]]
+  [[ "$output" == *"<target>"* ]]        # generic template, not per-target
+  [[ "$output" == *"scp -F"* ]]
+  [ ! -s "$SSHLOG" ]
 }

@@ -1,6 +1,6 @@
 .\" Manpage for ssh-deploy.
 .\" Keep the .TH version in sync with VERSION in the ssh-deploy script.
-.TH SSH-DEPLOY 1 "2026-06-25" "ssh-deploy 1.2.0" "User Commands"
+.TH SSH-DEPLOY 1 "2026-06-30" "ssh-deploy 1.3.0" "User Commands"
 .SH NAME
 ssh\-deploy \- push a local script to an SSH host and run it there as root
 .SH SYNOPSIS
@@ -22,6 +22,17 @@ if available, otherwise from a numbered menu \(em or given directly with
 A manual
 .I user@host
 entry is always available.
+.PP
+Several targets may be selected at once (mark multiple hosts with
+.B TAB
+in the
+.BR fzf (1)
+picker, give several numbers in the menu, or pass a comma\-separated list to
+.BR \-\-target ).
+The payload is then deployed to each target in turn. By default deployment stops
+at the first target whose script fails;
+.B \-\-keep\-going
+continues through the rest and reports a summary at the end.
 .PP
 Before anything is copied,
 .B ssh\-deploy
@@ -55,13 +66,18 @@ and
 connections.
 .SH OPTIONS
 .TP
-.BR \-t ", " \-\-target " " \fIHOST\fR
-Deploy to this SSH alias or
-.I user@host
-and skip the host picker.
+.BR \-t ", " \-\-target " " \fIHOSTS\fR
+Deploy to these SSH aliases or
+.IR user@host es,
+skipping the host picker. Accepts a comma\-separated list and may be given more
+than once; the values accumulate.
 .TP
 .BR \-y ", " \-\-yes
 Do not ask for confirmation before deploying.
+.TP
+.BR \-k ", " \-\-keep\-going
+When deploying to multiple targets, continue after a target fails instead of
+stopping. The exit status is non\-zero if any target failed.
 .TP
 .BR \-n ", " \-\-dry\-run
 Show what would happen \(em the plan and the exact commands \(em without
@@ -108,6 +124,12 @@ failed, the deploy was cancelled, or the remote script exited non\-zero).
 When the remote script itself fails, its exit status is reported in the error
 message; the process exit code is
 .BR 1 .
+With multiple targets, the exit code is
+.B 1
+if any target failed \(em immediately on the first failure, or after all targets
+when
+.B \-\-keep\-going
+is used.
 .SH FILES
 .TP
 .I ~/.ssh/config
@@ -140,6 +162,14 @@ Deploy straight to a known host:
 .RS
 .EX
 ssh\-deploy \-t web01 setup.sh
+.EE
+.RE
+.PP
+Deploy to several hosts, continuing even if one fails:
+.PP
+.RS
+.EX
+ssh\-deploy \-k \-t web01,web02,db setup.sh
 .EE
 .RE
 .PP

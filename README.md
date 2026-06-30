@@ -11,6 +11,7 @@ You keep small provisioning / maintenance scripts on your machine and want to ru
 ## Features
 
 - **Host picker** from `~/.ssh/config` — fuzzy ([fzf](https://github.com/junegunn/fzf)) with a live `ssh -G` preview, or a numbered-menu fallback when fzf isn't installed.
+- **Multiple targets in one run** — mark several hosts (`TAB` in fzf, several numbers in the menu, or `-t web01,web02`); deploys to each in turn, **stopping at the first failure** (or `--keep-going` to push through and get a summary).
 - **Uses your existing SSH setup** — keys, jump hosts, YubiKey/FIDO, ports — nothing to reconfigure. Manual `user@host` always available.
 - **Safe by default** — a deploy plan + `y/N` confirm (skip with `-y`), and a `--dry-run` that prints the exact commands without touching anything.
 - **Readable output** — colors that auto-disable when piped, on `--no-color`, or when `NO_COLOR` is set.
@@ -64,18 +65,21 @@ ARGUMENTS
   payload              local script to run as root on the target  (required)
 
 OPTIONS
-  -t, --target HOST   deploy to this ssh alias / user@host (skip the picker)
+  -t, --target HOSTS  deploy to these ssh aliases / user@hosts (comma-separated)
   -y, --yes           don't ask for confirmation
   -n, --dry-run       show what would happen; don't copy or run
+  -k, --keep-going    with multiple targets, continue after a failure (default: stop)
   -c, --config FILE   ssh config to read (default: ~/.ssh/config)
       --no-color      disable colored output
   -h, --help          show this help
   -V, --version       show version
 
 EXAMPLES
-  ssh-deploy setup.sh              # pick a host (fzf/menu), then deploy
-  ssh-deploy -t web01 setup.sh     # straight to a known host
-  ssh-deploy -n -t web01 setup.sh  # dry-run: show the plan, change nothing
+  ssh-deploy setup.sh                 # pick host(s) (fzf/menu), then deploy
+  ssh-deploy -t web01 setup.sh        # straight to a known host
+  ssh-deploy -t web01,web02 setup.sh  # several hosts, stop on first error
+  ssh-deploy -k -t web01,web02 setup.sh  # keep going even if one fails
+  ssh-deploy -n -t web01 setup.sh     # dry-run: show the plan, change nothing
 ```
 
 Full reference: `man ssh-deploy` (installed by Homebrew; documents exit status, files, and environment too).
@@ -83,11 +87,11 @@ Full reference: `man ssh-deploy` (installed by Homebrew; documents exit status, 
 ## How it works
 
 1. Parse `~/.ssh/config` (or `--config FILE`) for `Host` aliases (wildcard/pattern entries are skipped; `Include` files aren't followed). The config is **optional** — with no `~/.ssh/config` and no `--config`, the picker is skipped and you're prompted for a target (or pass `--target`). When a config is present it's also used for the actual `scp`/`ssh` connection.
-2. Pick one (fzf preview shows the resolved `ssh -G` hostname/user/port/key) or pass `--target`; manual `user@host` is always an option.
-3. Print the deploy plan and ask to confirm (`-y` to skip, `-n` to only preview).
-4. Open one shared SSH connection (so the password / key-touch happens **once**), `mktemp` a private file under `/tmp` on the target, and `scp` the payload into it — no predictable name, no symlink/clobber race.
+2. Pick one or more (fzf preview shows the resolved `ssh -G` hostname/user/port/key; `TAB` marks several) or pass `--target` (comma-separated); manual `user@host` is always an option.
+3. Print the deploy plan — listing every target — and ask to confirm (`-y` to skip, `-n` to only preview).
+4. For each target, open one shared SSH connection (so the password / key-touch happens **once per host**), `mktemp` a private file under `/tmp` on the target, and `scp` the payload into it — no predictable name, no symlink/clobber race.
 5. `ssh -t <target> "sudo bash <tmpfile>; rm -f <tmpfile>"` — the TTY lets the `sudo` password (and any key touch) work, and the temp copy is always removed.
-6. Exit with the remote script's exit code.
+6. Stop at the first target whose script fails (or continue with `--keep-going`), and exit with the remote script's exit code — non-zero if any target failed.
 
 ## Security
 
