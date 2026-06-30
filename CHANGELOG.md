@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-30
+
+### Added
+- Multiple targets in a single run. Mark several hosts with `TAB` in the fzf
+  picker, enter several numbers in the menu, or pass a comma-separated list to
+  `--target` (which may also be repeated). The payload is deployed to each
+  target in turn.
+- `--keep-going` / `-k`: with multiple targets, continue after a target fails
+  and report a summary at the end. By default deployment **stops at the first
+  failure**; the exit code is non-zero if any target failed.
+
+### Changed
+- The deploy plan lists every selected target. `--dry-run` shows the per-target
+  commands once with a `<target>` placeholder instead of repeating them.
+- Each target gets its own short-lived multiplexed SSH connection (one auth per
+  host), torn down before moving on or on abort.
+
 ## [1.2.0] - 2026-06-25
 
 ### Added

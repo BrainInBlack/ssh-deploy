@@ -10,25 +10,28 @@
 # License: MIT — see LICENSE
 #
 set -uo pipefail
-VERSION=1.2.0
+VERSION=1.3.0
 
 # ---------------------------------------------------------------- defaults / args
 SSH_CONFIG="$HOME/.ssh/config"
 PAYLOAD=""
-opt_target="" opt_yes=0 opt_dryrun=0 opt_color=1 want_help=0 config_explicit=0
+opt_target="" opt_yes=0 opt_dryrun=0 opt_color=1 opt_keepgoing=0 want_help=0 config_explicit=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help)     want_help=1; shift ;;
-    -V|--version)  echo "ssh-deploy $VERSION"; exit 0 ;;
-    -y|--yes)      opt_yes=1; shift ;;
-    -n|--dry-run)  opt_dryrun=1; shift ;;
-    --no-color)    opt_color=0; shift ;;
-    -t|--target)   opt_target="${2:-}"; [ -n "$opt_target" ] || { echo "--target needs a value" >&2; exit 2; }; shift 2 ;;
-    -c|--config)   SSH_CONFIG="${2:-}"; [ -n "$SSH_CONFIG" ] || { echo "--config needs a value" >&2; exit 2; }; config_explicit=1; shift 2 ;;
-    --)            shift; break ;;
-    -*)            echo "unknown option: $1  (try --help)" >&2; exit 2 ;;
-    *)             PAYLOAD="$1"; shift ;;
+    -h|--help)       want_help=1; shift ;;
+    -V|--version)    echo "ssh-deploy $VERSION"; exit 0 ;;
+    -y|--yes)        opt_yes=1; shift ;;
+    -n|--dry-run)    opt_dryrun=1; shift ;;
+    -k|--keep-going) opt_keepgoing=1; shift ;;
+    --no-color)      opt_color=0; shift ;;
+    # -t may be given more than once and/or as a comma-separated list; the values
+    # accumulate into one comma-joined string that add_targets() later splits.
+    -t|--target)     tv="${2:-}"; [ -n "$tv" ] || { echo "--target needs a value" >&2; exit 2; }; opt_target="${opt_target:+$opt_target,}$tv"; shift 2 ;;
+    -c|--config)     SSH_CONFIG="${2:-}"; [ -n "$SSH_CONFIG" ] || { echo "--config needs a value" >&2; exit 2; }; config_explicit=1; shift 2 ;;
+    --)              shift; break ;;
+    -*)              echo "unknown option: $1  (try --help)" >&2; exit 2 ;;
+    *)               PAYLOAD="$1"; shift ;;
   esac
 done
 
@@ -62,18 +65,21 @@ ${BOLD}ARGUMENTS${RST}
   payload              local script to run as root on the target  ${DIM}(required)${RST}
 
 ${BOLD}OPTIONS${RST}
-  ${CYN}-t, --target HOST${RST}   deploy to this ssh alias / user@host (skip the picker)
+  ${CYN}-t, --target HOSTS${RST}  deploy to these ssh aliases / user@hosts ${DIM}(comma-separated; skip the picker)${RST}
   ${CYN}-y, --yes${RST}           don't ask for confirmation
   ${CYN}-n, --dry-run${RST}       show what would happen; don't copy or run
+  ${CYN}-k, --keep-going${RST}    with multiple targets, continue after a failure ${DIM}(default: stop)${RST}
   ${CYN}-c, --config FILE${RST}   ssh config to read ${DIM}(default: ~/.ssh/config)${RST}
       ${CYN}--no-color${RST}      disable colored output
   ${CYN}-h, --help${RST}          show this help
   ${CYN}-V, --version${RST}       show version
 
 ${BOLD}EXAMPLES${RST}
-  ssh-deploy setup.sh              ${DIM}# pick a host (fzf/menu), then deploy${RST}
-  ssh-deploy -t web01 setup.sh     ${DIM}# straight to a known host${RST}
-  ssh-deploy -n -t web01 setup.sh  ${DIM}# dry-run: show the plan, change nothing${RST}
+  ssh-deploy setup.sh                  ${DIM}# pick host(s) (fzf/menu), then deploy${RST}
+  ssh-deploy -t web01 setup.sh         ${DIM}# straight to a known host${RST}
+  ssh-deploy -t web01,web02 setup.sh   ${DIM}# deploy to several, stop on first error${RST}
+  ssh-deploy -k -t web01,web02 setup.sh${DIM} # keep going even if one fails${RST}
+  ssh-deploy -n -t web01 setup.sh      ${DIM}# dry-run: show the plan, change nothing${RST}
 EOF
 }
 
@@ -119,62 +125,94 @@ print_hosts() {
 # ---------------------------------------------------------------- payload check
 [ -f "$PAYLOAD" ] || die "payload not found: ${BOLD}$PAYLOAD${RST}"
 
-# ---------------------------------------------------------------- choose target
+# ---------------------------------------------------------------- choose target(s)
+# Append comma- or space-separated tokens to the global targets array.
+add_targets() {
+  local s="${1//,/ }" tok
+  # shellcheck disable=SC2086  # intentional word-splitting on the normalized list
+  for tok in $s; do [ -n "$tok" ] && targets+=("$tok"); done
+}
+
 pick_fzf() {
-  local lines="" idx choice preview
+  local lines="" idx preview
   for ((idx=0; idx<${#aliases[@]}; idx++)); do
     lines+="${aliases[$idx]}"$'\t'"${hosts[$idx]}"$'\n'
   done
   lines+="[manual]"$'\t'"type a target by hand"$'\n'
   # resolve against the same config the deploy will use
   preview="ssh -G -F '$SSH_CONFIG' {1} 2>/dev/null | grep -iE '^(hostname|user|port|identityfile) ' || echo '(manual entry)'"
-  choice=$(printf '%s' "$lines" | fzf \
+  # --multi: TAB marks several hosts; fzf echoes each selected line verbatim.
+  printf '%s' "$lines" | fzf --multi \
       --delimiter='\t' --with-nth=1,2 --ansi \
       --prompt='deploy ▸ ' --height='50%' --reverse --border \
-      --header='enter = deploy    esc = cancel' \
+      --header='tab = mark    enter = deploy    esc = cancel' \
       --preview "$preview" \
-      --preview-window='right:48%') || return 1
-  [ -n "$choice" ] || return 1
-  printf '%s' "${choice%%$'\t'*}"
+      --preview-window='right:48%' || return 1
 }
 
-target=""
+targets=()
 if [ -n "$opt_target" ]; then
-  target="$opt_target"
+  add_targets "$opt_target"
 elif [ ${#aliases[@]} -eq 0 ]; then
   if [ -f "$SSH_CONFIG" ]; then warn "no host aliases in $SSH_CONFIG"
   else warn "no ssh config at $SSH_CONFIG — enter a target manually"; fi
-  printf '%sTarget (user@host):%s ' "$BOLD" "$RST"; read -r target
+  printf '%sTarget(s) (user@host, comma-separated):%s ' "$BOLD" "$RST"; read -r line; add_targets "$line"
 elif command -v fzf >/dev/null 2>&1; then
   sel="$(pick_fzf)" || die "cancelled."
-  if [ "$sel" = "[manual]" ]; then printf '%sTarget (user@host):%s ' "$BOLD" "$RST"; read -r target
-  else target="$sel"; fi
+  [ -n "$sel" ] || die "no target chosen."
+  while IFS= read -r ln; do
+    [ -n "$ln" ] || continue
+    a="${ln%%$'\t'*}"
+    if [ "$a" = "[manual]" ]; then
+      printf '%sTarget(s) (user@host, comma-separated):%s ' "$BOLD" "$RST"; read -r m; add_targets "$m"
+    else
+      targets+=("$a")
+    fi
+  done <<EOF
+$sel
+EOF
 else
-  title "select a host"
+  title "select host(s)"
   print_hosts
   printf "  %s%2d%s  %smanual entry%s\n" "$DIM" "$(( ${#aliases[@]} + 1 ))" "$RST" "$MAG" "$RST"
-  printf '%sNumber:%s ' "$BOLD" "$RST"; read -r n
-  if [ "$n" = "$(( ${#aliases[@]} + 1 ))" ]; then printf '%sTarget (user@host):%s ' "$BOLD" "$RST"; read -r target
-  elif [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le ${#aliases[@]} ]; then target="${aliases[$((n-1))]}"
-  else die "invalid selection."; fi
+  printf '%sNumber(s):%s ' "$BOLD" "$RST"; read -r nums
+  nums="${nums//,/ }"
+  # shellcheck disable=SC2086  # intentional word-splitting on the entered numbers
+  for n in $nums; do
+    if [ "$n" = "$(( ${#aliases[@]} + 1 ))" ]; then
+      printf '%sTarget(s) (user@host, comma-separated):%s ' "$BOLD" "$RST"; read -r m; add_targets "$m"
+    elif [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le ${#aliases[@]} ]; then
+      targets+=("${aliases[$((n-1))]}")
+    else
+      die "invalid selection: $n"
+    fi
+  done
 fi
-[ -n "$target" ] || die "no target chosen."
+[ ${#targets[@]} -gt 0 ] || die "no target chosen."
 
 # ---------------------------------------------------------------- plan + confirm
 base="$(basename "$PAYLOAD")"
 remote_tmpl="/tmp/ssh-deploy.XXXXXX"
 
 title "deploy plan"
-printf "  %sPayload%s  %s\n"        "$DIM" "$RST" "$PAYLOAD"
-printf "  %sTarget %s  %s%s%s\n"    "$DIM" "$RST" "$BOLD$CYN" "$target" "$RST"
+printf "  %sPayload%s  %s\n" "$DIM" "$RST" "$PAYLOAD"
+if [ ${#targets[@]} -eq 1 ]; then
+  printf "  %sTarget %s  %s%s%s\n" "$DIM" "$RST" "$BOLD$CYN" "${targets[0]}" "$RST"
+else
+  printf "  %sTargets%s  %s%d%s %s(%s)%s\n" "$DIM" "$RST" "$BOLD" "${#targets[@]}" "$RST" \
+    "$DIM" "$([ "$opt_keepgoing" = "1" ] && echo 'keep-going' || echo 'stop on first error')" "$RST"
+  for t in "${targets[@]}"; do printf "    %s•%s %s%s%s\n" "$DIM" "$RST" "$BOLD$CYN" "$t" "$RST"; done
+fi
 printf "  %sRemote %s  %s %s(mktemp; sudo bash, then removed)%s\n" "$DIM" "$RST" "$remote_tmpl" "$DIM" "$RST"
 
 if [ "$opt_dryrun" = "1" ]; then
+  # The per-target commands are identical bar the host, so show them once with a
+  # <target> placeholder rather than repeating them for every target listed above.
   warn "dry-run — nothing deployed"
   F=""; [ -f "$SSH_CONFIG" ] && F="-F $SSH_CONFIG "
-  info "remote=\$(ssh ${F}$target 'mktemp $remote_tmpl')"
-  info "scp ${F}\"$PAYLOAD\" \"$target:\$remote\""
-  info "ssh ${F}-t $target \"sudo bash \$remote; rm -f \$remote\""
+  info "remote=\$(ssh ${F}<target> 'mktemp $remote_tmpl')"
+  info "scp ${F}\"$PAYLOAD\" \"<target>:\$remote\""
+  info "ssh ${F}-t <target> \"sudo bash \$remote; rm -f \$remote\""
   exit 0
 fi
 
@@ -184,27 +222,63 @@ if [ "$opt_yes" != "1" ]; then
 fi
 
 # ---------------------------------------------------------------- deploy
-# Share one SSH connection for mktemp + scp + run, so authentication (password
-# or key touch) happens once and all three operations reuse it. The control
+# Each target gets its own short-lived multiplexed SSH connection: one auth
+# (password / key touch) per host, shared by mktemp + scp + run. The control
 # socket lives under /tmp to keep the path short (Unix socket length limit).
-ctl_dir="$(mktemp -d /tmp/ssh-deploy.XXXXXX)" || die "could not create control dir."
-ssh_opts=(-o ControlMaster=auto -o "ControlPath=$ctl_dir/c" -o ControlPersist=30s)
-# only pass -F when the config exists — ssh errors out on a missing -F file
-[ -f "$SSH_CONFIG" ] && ssh_opts+=(-F "$SSH_CONFIG")
-trap 'ssh "${ssh_opts[@]}" -O exit "$target" 2>/dev/null; rm -rf "$ctl_dir"' EXIT
+# cur_ctl/cur_target/ssh_opts track the in-flight connection so the EXIT trap can
+# tear it down even if we abort mid-deploy.
+cur_ctl="" cur_target="" ssh_opts=()
+close_master() {
+  [ -n "$cur_ctl" ] || return 0
+  ssh "${ssh_opts[@]}" -O exit "$cur_target" 2>/dev/null
+  rm -rf "$cur_ctl"
+  cur_ctl=""
+}
+trap close_master EXIT
 
-echo
-step "copying ${BOLD}$base${RST} → ${CYN}$target${RST}"
-# Create the remote file atomically (mktemp, mode 600): no predictable /tmp
-# name, no symlink/clobber race, and the path carries no shell-special chars.
-# shellcheck disable=SC2029  # remote_tmpl is a fixed template — expanding it client-side is intended
-remote="$(ssh "${ssh_opts[@]}" "$target" "mktemp $remote_tmpl")" || die "could not create remote temp file."
-[ -n "$remote" ] || die "remote mktemp returned an empty path."
-scp "${ssh_opts[@]}" -q "$PAYLOAD" "$target:$remote" || die "scp failed."
-ok "copied"
-step "running on ${CYN}$target${RST} ${DIM}(sudo)${RST}"
-hr
-ssh "${ssh_opts[@]}" -t "$target" "sudo bash '$remote'; r=\$?; rm -f '$remote'; exit \$r"
-rc=$?
-hr
-if [ "$rc" -eq 0 ]; then ok "done on ${BOLD}$target${RST}"; else die "finished with errors (rc=$rc) on $target"; fi
+deploy_one() {
+  local target="$1" remote rc
+  cur_ctl="$(mktemp -d /tmp/ssh-deploy.XXXXXX)" || { warn "could not create control dir for $target"; return 1; }
+  cur_target="$target"
+  ssh_opts=(-o ControlMaster=auto -o "ControlPath=$cur_ctl/c" -o ControlPersist=30s)
+  # only pass -F when the config exists — ssh errors out on a missing -F file
+  [ -f "$SSH_CONFIG" ] && ssh_opts+=(-F "$SSH_CONFIG")
+
+  echo
+  step "copying ${BOLD}$base${RST} → ${CYN}$target${RST}"
+  # Create the remote file atomically (mktemp, mode 600): no predictable /tmp
+  # name, no symlink/clobber race, and the path carries no shell-special chars.
+  # shellcheck disable=SC2029  # remote_tmpl is a fixed template — expanding it client-side is intended
+  remote="$(ssh "${ssh_opts[@]}" "$target" "mktemp $remote_tmpl")" || { warn "could not create remote temp file on $target"; close_master; return 1; }
+  [ -n "$remote" ] || { warn "remote mktemp returned an empty path on $target"; close_master; return 1; }
+  scp "${ssh_opts[@]}" -q "$PAYLOAD" "$target:$remote" || { warn "scp to $target failed"; close_master; return 1; }
+  ok "copied"
+  step "running on ${CYN}$target${RST} ${DIM}(sudo)${RST}"
+  hr
+  ssh "${ssh_opts[@]}" -t "$target" "sudo bash '$remote'; r=\$?; rm -f '$remote'; exit \$r"
+  rc=$?
+  hr
+  close_master
+  return "$rc"
+}
+
+last_rc=0 failed=()
+for t in "${targets[@]}"; do
+  if deploy_one "$t"; then
+    ok "done on ${BOLD}$t${RST}"
+  else
+    last_rc=$?
+    failed+=("$t")
+    if [ "$opt_keepgoing" = "1" ]; then
+      warn "errors (rc=$last_rc) on $t — continuing"
+    else
+      die "finished with errors (rc=$last_rc) on $t"
+    fi
+  fi
+done
+
+if [ ${#failed[@]} -gt 0 ]; then
+  die "completed with failures (rc=$last_rc) on: ${failed[*]}"
+fi
+[ ${#targets[@]} -gt 1 ] && ok "all ${#targets[@]} targets succeeded"
+exit 0
